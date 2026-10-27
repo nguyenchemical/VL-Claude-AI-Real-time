@@ -257,7 +257,12 @@ body.light .meter{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.06);}
 
 body.light .log{background:rgba(0,0,0,.04);color:#475569;border-color:rgba(0,0,0,.08);}
 .log b{color:#34d399;}
-.sets{flex:1;min-height:0;overflow-y:auto;margin:4px 0;max-height:28vh;}
+.sets{flex:none;margin:4px 0;}
+body.has-sets .log{min-height:30px;max-height:44px;}
+.tf-zone.grow{overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.sets.scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
+.set-ai{margin-left:auto;font-size:.6rem;font-weight:700;padding:2px 7px;border-radius:99px;background:rgba(52,211,153,.14);color:#34d399;white-space:nowrap;}
+.odds-line{font-size:.58rem;opacity:.75;text-align:center;margin:2px 0 4px;}
 .set-row{
   display:flex;align-items:center;gap:4px;padding:4px 6px;margin-bottom:3px;
   border-radius:8px;background:rgba(0,0,0,.18);flex-wrap:wrap;
@@ -350,6 +355,7 @@ body.light .set-row{background:rgba(0,0,0,.04);}
     <div class="pbg"><div class="pfill" id="trainProgress"></div></div>
     <div class="log" id="trainLog">Sẵn sàng…</div>
     <div class="sets" id="predictionsList"></div>
+    <div class="odds-line" id="oddsLine"></div>
     <div class="game-label" id="resultGameLabel">Chọn game · nhấn HUẤN LUYỆN</div>
     <div id="resultArea"></div>
     <div id="scanArea"></div>
@@ -497,11 +503,11 @@ function gameSpec(gameType){
 }
 
 /** Phân phối tần suất THẬT từ rawDraws (0..1 normalized). Không bịa số. */
-function buildFreqProbs(gameType){
+function buildFreqProbs(gameType, drawsArg){
   var spec=gameSpec(gameType);
   var featureSize=spec.isDigit?10:spec.maxN;
   var freqs=new Array(featureSize).fill(0);
-  var draws=rawDraws||[];
+  var draws=drawsArg||rawDraws||[];
   if(!draws.length) return freqs.map(function(){return 1/featureSize});
 
   draws.forEach(function(d){
@@ -537,21 +543,44 @@ function getActiveProbs(gameType){
 
 function snakeSplit(list,n){var out=[];for(var i=0;i<n;i++)out.push([]);list.forEach(function(x,i){var r=Math.floor(i/n),c=i%n;out[r%2?n-1-c:c].push(x)});return out}
 function maxQty(){var sp=gameSpec(document.getElementById("gameTypeTf")?document.getElementById("gameTypeTf").value:currentGame);return sp.isDigit?10:Math.min(10,Math.floor(sp.maxN/sp.count))}
-/** Chọn các số có xác suất cao nhất, chia kiểu rắn cho các bộ => KHÔNG ngẫu nhiên, KHÔNG trùng số giữa các bộ */
-function buildSetsDet(gameType, probs, qty){
-  var spec=gameSpec(gameType);
-  if(spec.isDigit){var per=spec.pairs?2:1,ranked=rankAllTriplets(gameType,probs);return snakeSplit(ranked.slice(0,qty*per).map(function(r){return r.s}),qty)}
-  var raw=Array.from((probs&&probs.length===spec.maxN)?probs:buildFreqProbs(gameType));
-  var order=raw.map(function(p,i){return {n:i+1,p:p}}).sort(function(a,b){return b.p-a.p||a.n-b.n}).map(function(x){return x.n});
-  qty=Math.max(1,Math.min(qty,Math.floor(spec.maxN/spec.count)));
-  var sets=snakeSplit(order.slice(0,qty*spec.count),qty).map(function(x){return x.sort(function(a,b){return a-b})});
+/** Chia pool đã xếp hạng thành q bộ (mỗi bộ c phần tử, KHÔNG trùng nhau). rot xoay thứ tự rắn theo từng lớp → cùng pool nhưng bộ khác. */
+function partitionSets(pool,q,rot){
+  var out=[],i;for(i=0;i<q;i++)out.push([]);
+  for(var j=0;j<pool.length;j++){var layer=Math.floor(j/q),pos=j%q,base=layer%2?q-1-pos:pos;out[(base+rot*layer)%q].push(pool[j]);}
+  return out;
+}
+function setGeom(gameType,qty){
+  var spec=gameSpec(gameType),c,q,N;
+  if(spec.isDigit){c=spec.pairs?2:1;q=Math.max(1,qty);N=1000;}
+  else{c=spec.count;q=Math.max(1,Math.min(qty,Math.floor(spec.maxN/c)));N=spec.maxN;}
+  return {spec:spec,c:c,q:q,N:N,need:q*c,W:N-q*c+1,R:q};
+}
+/** Tổng số cấu hình bộ số khác nhau (cửa sổ hạng × phép xoay) cho game + số bộ */
+function variantTotal(gameType,qty){var g=setGeom(gameType,qty);return g.W*g.R;}
+/**
+ * Sinh bộ số XÁC ĐỊNH (không Math.random):
+ * variant v → cửa sổ hạng w=floor(v/R) (R=số bộ) và phép xoay r=v%R. v=0 là cấu hình tốt nhất (top xác suất, chia rắn).
+ * Mọi bộ trong một lần sinh không trùng số; mỗi variant cho tổ hợp khác nhau.
+ */
+function buildSetsDet(gameType, probs, qty, variant, D){
+  D=D||rawDraws||[];variant=variant||0;
+  var g=setGeom(gameType,qty),spec=g.spec,order;
+  if(spec.isDigit){order=rankAllTriplets(gameType,probs,D).map(function(r){return r.s});}
+  else{
+    var raw=Array.from((probs&&probs.length===spec.maxN)?probs:buildFreqProbs(gameType,D));
+    order=raw.map(function(p,i){return {n:i+1,p:p}}).sort(function(a,b){return b.p-a.p||a.n-b.n}).map(function(x){return x.n});
+  }
+  var T=g.W*g.R,v=((variant%T)+T)%T,r=v%g.R,w=Math.floor(v/g.R);
+  var sets=partitionSets(order.slice(w,w+g.need),g.q,r);
+  if(!spec.isDigit) sets=sets.map(function(x){return x.sort(function(a,b){return a-b})});
   if(gameType==="lotto535"){
-    var f=new Array(12).fill(0);(rawDraws||[]).forEach(function(d){if(d.numbers&&d.numbers.length>=6){var v=d.numbers[5];if(v>=1&&v<=12)f[v-1]++}});
+    var f=new Array(12).fill(0);D.forEach(function(d){if(d.numbers&&d.numbers.length>=6){var x=d.numbers[5];if(x>=1&&x<=12)f[x-1]++}});
     var so=f.map(function(c,i){return {n:i+1,c:c}}).sort(function(a,b){return b.c-a.c||a.n-b.n});
-    sets=sets.map(function(x,i){return x.concat([so[i%12].n])});
+    sets=sets.map(function(x,i){return x.concat([so[(i+v)%12].n])});
   }
   return sets;
 }
+function canonSig(sets){return JSON.stringify(sets.map(function(x){return x.join(",")}).sort())}
 function weightedSampleUnique(candidates, count, used){
   return candidates.slice().sort(function(a,b){return b.prob-a.prob||a.number-b.number}).filter(function(c){return !(used&&used.has(c.number))}).slice(0,count).map(function(c){return c.number});
 }
@@ -561,11 +590,12 @@ function weightedSampleUnique(candidates, count, used){
  * xếp hạng toàn bộ 000–999 theo tần suất vị trí (từ rawDraws + probs AI nếu có),
  * KHÔNG Math.random, loại bộ trùng, lấy top điểm.
  */
-function rankAllTriplets(gameType, probs){
+function rankAllTriplets(gameType, probs, D){
+  D=D||rawDraws||[];
   var posFreq=[[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0]];
   var digitFreq=[0,0,0,0,0,0,0,0,0,0];
   var seen={};
-  (rawDraws||[]).forEach(function(d, di){
+  D.forEach(function(d, di){
     if(!d||!d.numbers) return;
     d.numbers.forEach(function(s){
       s=String(s).replace(/\D/g,"").padStart(3,"0").slice(-3);
@@ -586,7 +616,7 @@ function rankAllTriplets(gameType, probs){
     }
   }
   var totalD=digitFreq.reduce(function(a,b){return a+b},0)||1;
-  var T3=[0,1,2].map(function(){return Array.from({length:10},function(){return new Array(10).fill(0.01)})}),mk=[0,1,2].map(function(){return new Array(10).fill(0)}),rd=rawDraws||[];
+  var T3=[0,1,2].map(function(){return Array.from({length:10},function(){return new Array(10).fill(0.01)})}),mk=[0,1,2].map(function(){return new Array(10).fill(0)}),rd=D;
   function trip(x){return String(x).replace(/\D/g,"").padStart(3,"0").slice(-3)}
   for(var i2=1;i2<rd.length;i2++){var A2=rd[i2].numbers||[],B2=rd[i2-1].numbers||[],m2=Math.min(A2.length,B2.length);for(var j2=0;j2<m2;j2++){var sa=trip(A2[j2]),sb=trip(B2[j2]);for(var p2=0;p2<3;p2++)T3[p2][+sa[p2]][+sb[p2]]+=1}}
   ((rd[0]&&rd[0].numbers)||[]).forEach(function(x){var s0=trip(x);for(var p2=0;p2<3;p2++){var row=T3[p2][+s0[p2]],sm=row.reduce(function(u,v){return u+v},0);for(var v2=0;v2<10;v2++)mk[p2][v2]+=row[v2]/sm}});
@@ -768,7 +798,8 @@ function presetNums(kind){
 
 /* ========== DYNAMIC JACKPOT METER (chuẩn index-2, không random %) ========== */
 function resetMeter(){
-  lastMeterScore=0;
+  var _pl=document.getElementById("predictionsList");if(_pl&&!_pl.children.length)document.body.classList.remove("has-sets");
+  lastMeterScore=0;lastSetScores=[];var _ol=document.getElementById("oddsLine");if(_ol)_ol.textContent="";
   document.getElementById("meterBar").style.width="0%";
   document.getElementById("meterScore").textContent="0%";
   var b=document.getElementById("meterBadge");
@@ -778,107 +809,88 @@ function resetMeter(){
   b.style.border="";
   b.style.animation="";
 }
-function computeDynamicMeter(probs, generatedSets, gameType, dataLen){
-  if(!probs||!generatedSets||!generatedSets.length) return 0;
-  var isDigit=String(gameType).indexOf("max3d")===0;
-  var arr=Array.from(probs);
-  var sorted=arr.slice().sort(function(a,b){return b-a});
-  var n=arr.length;
-
-  var meanProb=0, countNums=0;
-  generatedSets.forEach(function(set){
-    if(isDigit){
-      String(set.join("")).split("").forEach(function(ch){
-        var d=parseInt(ch,10);
-        if(!isNaN(d)&&d<arr.length){ meanProb+=arr[d]; countNums++; }
-      });
-    } else {
-      set.forEach(function(num){
-        if(typeof num!=="number") return;
-        var idx=num-1;
-        if(idx>=0&&idx<arr.length){ meanProb+=arr[idx]; countNums++; }
-      });
-    }
-  });
-  meanProb=countNums>0?meanProb/countNums:0.1;
-
-  var topK=Math.max(1,Math.floor(n*0.1));
-  var sumAll=sorted.reduce(function(s,v){return s+v},0)||1;
-  var topMass=sorted.slice(0,topK).reduce(function(s,v){return s+v},0)/sumAll;
-
-  var sumP=arr.reduce(function(s,v){return s+Math.max(v,1e-9)},0);
-  var entropy=0;
-  arr.forEach(function(v){
-    var p=Math.max(v,1e-9)/sumP;
-    entropy-=p*Math.log2(p);
-  });
-  var maxEnt=Math.log2(n||2);
-  var concentration=1-(entropy/maxEnt);
-
-  var median=sorted[Math.floor(n/2)]||0.01;
-  var separation=Math.min(1,(sorted[0]-median)/(sorted[0]+1e-6));
-
-  var allNums=new Set();
-  generatedSets.forEach(function(s){ s.forEach(function(x){ allNums.add(String(x)); }); });
-  var expectedUnique=isDigit?generatedSets.length*3:generatedSets.length*6;
-  var stability=Math.min(1, allNums.size/Math.max(expectedUnique*0.7,1));
-
-  var dataQuality=Math.min(1,(dataLen||0)/40);
-
-  var setMeans=generatedSets.map(function(set){
-    var s=0,c=0;
-    if(isDigit){
-      String(set.join("")).split("").forEach(function(ch){
-        var d=parseInt(ch,10);
-        if(!isNaN(d)&&d<arr.length){s+=arr[d];c++;}
-      });
-    } else {
-      set.forEach(function(num){
-        if(typeof num!=="number") return;
-        var idx=num-1;
-        if(idx>=0&&idx<arr.length){s+=arr[idx];c++;}
-      });
-    }
-    return c?s/c:0;
-  });
-  var avgMean=setMeans.reduce(function(a,b){return a+b},0)/setMeans.length;
-  var variance=setMeans.reduce(function(a,m){return a+(m-avgMean)*(m-avgMean)},0)/setMeans.length;
-  var agreement=Math.max(0,1-Math.sqrt(variance)*5);
-
-  // Validation: probs phải hợp lệ
-  var valid=arr.every(function(v){return isFinite(v)&&v>=0}) && countNums>0;
-  if(!valid) return 0;
-
-  var score=meanProb*28+topMass*18+concentration*12+separation*10+stability*12+dataQuality*12+agreement*8;
-  return Math.min(99, Math.max(5, Math.round(score*1.15+meanProb*40)));
+var lastSetScores=[];
+function mClamp(x){return Math.max(0,Math.min(1,x))}
+function meterIdx(set,isDigit,K){var out=[];
+  if(isDigit){String(set.join("")).split("").forEach(function(ch){var d=parseInt(ch,10);if(!isNaN(d)&&d<K)out.push(d)})}
+  else set.forEach(function(num){if(typeof num==="number"){var i=num-1;if(i>=0&&i<K)out.push(i)}});
+  return out;}
+/* ===== Meter BACKTEST THẬT (walk-forward) =====
+ * Với mỗi bộ #i, quy tắc sinh bộ (cửa sổ hạng + phép xoay + vị trí i) được chạy lại trên B kỳ thật gần nhất,
+ * mỗi kỳ CHỈ dùng dữ liệu TRƯỚC kỳ đó (không nhìn trước). Điểm = phần trăm bộ ngẫu nhiên bị bộ này vượt về số trùng khớp.
+ * 50% = ngang ngẫu nhiên. Đây KHÔNG phải xác suất trúng Jackpot (mỗi bộ luôn có cơ hội như nhau). */
+function phiCdf(z){var t=1/(1+0.2316419*Math.abs(z)),d=0.3989423*Math.exp(-z*z/2),p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));return z>0?1-p:p}
+function tripMatch(a,b){var m=0;for(var i=0;i<3;i++)if(a.charAt(i)===b.charAt(i))m++;return m}
+function tripNorm(x){return String(x).replace(/\D/g,"").padStart(3,"0").slice(-3)}
+var _allTrip=null;
+function allTrip(){if(!_allTrip){_allTrip=[];for(var n=0;n<1000;n++)_allTrip.push(("00"+n).slice(-3))}return _allTrip}
+/** số trùng khớp của 1 bộ với 1 kỳ + kỳ vọng & phương sai nếu bộ là NGẪU NHIÊN */
+function matchStat(gameType,set,draw,spec,c){
+  if(spec.isDigit){
+    var dt=(draw.numbers||[]).map(tripNorm);if(!dt.length)return null;
+    var best=function(s){var m=0;for(var k=0;k<dt.length;k++){var x=tripMatch(s,dt[k]);if(x>m)m=x}return m};
+    var all=allTrip(),sum=0,sq=0;for(var i=0;i<1000;i++){var v=best(all[i]);sum+=v;sq+=v*v}
+    var mu=sum/1000,va=sq/1000-mu*mu,h=0;set.forEach(function(s){h+=best(tripNorm(s))});
+    return {h:h,mu:set.length*mu,va:set.length*va};
+  }
+  var d=gameType==="lotto535"?5:spec.count,mains=(draw.numbers||[]).slice(0,d);if(mains.length<d)return null;
+  var mine=gameType==="lotto535"?set.slice(0,5):set,N=spec.maxN,hit=0;
+  mine.forEach(function(x){if(mains.indexOf(x)>=0)hit++});
+  var cc=mine.length,pr=d/N;
+  return {h:hit,mu:cc*pr,va:cc*pr*(1-pr)*(N-cc)/(N-1)};
 }
+/** Trả về {pct:[...], B, avgHit:[...], avgExp:[...]} hoặc null nếu chưa đủ kỳ thật */
+function backtestSets(gameType,qty,variant,hist){
+  var n=(rawDraws||[]).length,B=Math.min(80,n-9);
+  if(B<12) return null;
+  var spec=gameSpec(gameType),g=setGeom(gameType,qty),ex=[],vr=[],hs=[],mu=[],i;
+  for(i=0;i<g.q;i++){ex.push(0);vr.push(0);hs.push(0);mu.push(0)}
+  var used=0;
+  for(var j=0;j<B;j++){
+    var history=rawDraws.slice(j+1,j+1+hist);
+    if(history.length<8) continue;
+    var pr=buildFreqProbs(gameType,history),sets=buildSetsDet(gameType,pr,qty,variant,history),ok=true,st=[];
+    for(i=0;i<sets.length;i++){var m=matchStat(gameType,sets[i],rawDraws[j],spec,g.c);if(!m){ok=false;break}st.push(m)}
+    if(!ok) continue;
+    used++;
+    for(i=0;i<st.length;i++){ex[i]+=st[i].h-st[i].mu;vr[i]+=st[i].va;hs[i]+=st[i].h;mu[i]+=st[i].mu}
+  }
+  if(used<12) return null;
+  var pct=[],avgHit=[],avgExp=[];
+  for(i=0;i<g.q;i++){var z=vr[i]>0?ex[i]/Math.sqrt(vr[i]):0;pct.push(Math.round(100*phiCdf(z)));avgHit.push(hs[i]/used);avgExp.push(mu[i]/used)}
+  return {pct:pct,B:used,avgHit:avgHit,avgExp:avgExp};
+}
+var lastBacktest=null;
+/** Meter = trung bình % của các bộ vừa sinh (mỗi % là backtest THẬT của đúng quy tắc tạo bộ đó). null nếu thiếu dữ liệu. */
+function computeDynamicMeter(probs, generatedSets, gameType, dataLen, variant, hist){
+  lastSetScores=[];lastBacktest=null;
+  if(!generatedSets||!generatedSets.length) return null;
+  var bt=backtestSets(gameType,generatedSets.length,variant||0,hist||100);
+  if(!bt) return null;
+  lastBacktest=bt;lastSetScores=bt.pct.slice(0,generatedSets.length);
+  return Math.round(lastSetScores.reduce(function(a,b){return a+b},0)/lastSetScores.length);
+}
+function jackpotOddsText(gameType){
+  var o={mega645:"1/8.145.060",power655:"1/28.989.675",lotto535:"1/3.895.584",max3d:"1/1.000 (mỗi bộ ba)",max3dplus:"1/1.000.000",max3dpro:"1/1.000.000"}[gameType];
+  return o?"Cơ hội trúng Jackpot mỗi bộ: "+o+" · như nhau cho mọi bộ số":"";}
 function applyMeterScore(score){
   lastMeterScore=Math.max(0,Math.min(100,Math.round(score)));
   document.getElementById("meterBar").style.width=lastMeterScore+"%";
   document.getElementById("meterScore").textContent=lastMeterScore+"%";
   var b=document.getElementById("meterBadge");
   b.style.animation="";
-  if(lastMeterScore>=90){
-    b.textContent="CẢNH BÁO CAO 💥";
-    b.style.background="rgba(239,68,68,.25)";
-    b.style.color="#f87171";
-    b.style.border="1px solid rgba(239,68,68,.4)";
-    b.style.animation="ping 1s infinite";
-  } else if(lastMeterScore>=78){
-    b.textContent="ĐANG TĂNG NHIỆT 🔥";
-    b.style.background="rgba(251,191,36,.2)";
-    b.style.color="#fbbf24";
-    b.style.border="1px solid rgba(251,191,36,.4)";
-  } else if(lastMeterScore>=50){
-    b.textContent="ỔN ĐỊNH";
-    b.style.background="rgba(59,130,246,.15)";
-    b.style.color="#60a5fa";
-    b.style.border="1px solid rgba(59,130,246,.3)";
+  if(lastMeterScore>=85){
+    b.textContent="CAO";
+    b.style.background="rgba(52,211,153,.2)";b.style.color="#34d399";b.style.border="1px solid rgba(52,211,153,.4)";
+  } else if(lastMeterScore>=65){
+    b.textContent="KHÁ";
+    b.style.background="rgba(251,191,36,.2)";b.style.color="#fbbf24";b.style.border="1px solid rgba(251,191,36,.4)";
+  } else if(lastMeterScore>=35){
+    b.textContent="NGANG NGẪU NHIÊN";
+    b.style.background="rgba(59,130,246,.15)";b.style.color="#60a5fa";b.style.border="1px solid rgba(59,130,246,.3)";
   } else {
     b.textContent="THẤP";
-    b.style.background="rgba(148,163,184,.2)";
-    b.style.color="#94a3b8";
-    b.style.border="";
+    b.style.background="rgba(148,163,184,.2)";b.style.color="#94a3b8";b.style.border="";
   }
   // Jackpot tiền thật — tách biệt, chỉ hiển thị từ Live
   var jv=document.getElementById("jackpotVal");
@@ -1206,6 +1218,14 @@ function onGameChange(){ applyAutoAlgo(); updateNextDraw(); predictQty=Math.min(
   setResultLabel(gt,"ai");
   initLive();
 }
+var runStates={};
+/** 1–3 bộ: hiển thị đủ, KHÔNG cuộn. Từ 4 bộ: chỉ cuộn dọc, khung cao đúng 3 hàng. */
+function applySetsScroll(el,n){
+  el.classList.remove("scroll");el.style.maxHeight="";el.style.overflow="";
+  document.body.classList.toggle("has-sets",n>0);
+  if(n>=4){var k=el.children,h=0,i;for(i=0;i<3&&i<k.length;i++)h+=k[i].offsetHeight+3;el.classList.add("scroll");el.style.maxHeight=(h||230)+"px";}
+  else el.style.overflow="visible";
+}
 function logTrain(html){var el=document.getElementById("trainLog");el.innerHTML=html+"<br>"+el.innerHTML}
 function clearTrainLog(){document.getElementById("trainLog").innerHTML=""}
 
@@ -1227,6 +1247,10 @@ async function trainAndPredict(){
   btn.disabled=true; clearTrainLog(); resetMeter();
   document.getElementById("predictionsList").innerHTML="";
 
+  var RS=runStates[gameType]||(runStates[gameType]={key:"",seq:0,sigs:[],variant:0}),dkey=((rawDraws[0]&&rawDraws[0].id)||"")+"|"+algoType;
+  if(RS.key!==dkey){RS.key=dkey;RS.seq=0;RS.sigs=[];RS.variant=0;}
+  RS.seq++;
+  var isTfAlgo=(algoType==="tf-lstm"||algoType==="tf-dense"),WINS=isTfAlgo?[100,85,70,55,40,30]:[100,150,70,200,50,120,40,90],win=WINS[(RS.seq-1)%WINS.length];
   var spec=gameSpec(gameType);
   var maxNum=spec.maxN;
   var isDigit=spec.isDigit;
@@ -1238,7 +1262,8 @@ async function trainAndPredict(){
   if(window.tf) await tf.nextFrame();
 
   // Giới hạn 100 kỳ gần nhất khi train TF — tránh treo mobile với 400 kỳ
-  var trainDraws=rawDraws.slice(0, Math.min(rawDraws.length, 100));
+  var trainDraws=rawDraws.slice(0, Math.max(Math.min(8,rawDraws.length), Math.min(rawDraws.length, win)));
+  logTrain("<b>[Lần chạy]</b> #"+RS.seq+" · cửa sổ "+trainDraws.length+" kỳ gần nhất (xác định, không ngẫu nhiên)");
   var chronological=trainDraws.slice().reverse();
   logTrain("<b>[Data]</b> Dùng "+chronological.length+"/"+rawDraws.length+" kỳ gần nhất để train");
   var vectors=chronological.map(function(d){
@@ -1283,20 +1308,21 @@ async function trainAndPredict(){
     } else logTrain("<b>[Freq]</b> Tần suất lịch sử thật");
     progress.style.width="85%";
   } else if(window.tf&&(algoType==="tf-dense"||algoType==="tf-lstm")){
-    var epochs=algoType==="tf-lstm"?8:6;
-    var timesteps=Math.min(4,Math.max(1,vectors.length-1));
+    var epochs=algoType==="tf-lstm"?5:6;
+    var timesteps=Math.min(3,Math.max(1,vectors.length-1));
     var useLstm=algoType==="tf-lstm"&&vectors.length>timesteps+2;
-    var xs,ys,model;
+    var xs,ys,model,prevBackend=null,t0=Date.now();
     if(useLstm){
-      var seqIn=[],seqLab=[];
-      for(var i=0;i<=vectors.length-timesteps-1;i++){seqIn.push(vectors.slice(i,i+timesteps));seqLab.push(vectors[i+timesteps])}
+      try{prevBackend=tf.getBackend();if(prevBackend!=="cpu"){await tf.setBackend("cpu");await tf.ready();logTrain("<b>[TF]</b> LSTM chạy backend CPU (ổn định, tránh treo trình duyệt)");}}catch(e){prevBackend=null;}
+      var lv=vectors.length>60?vectors.slice(-60):vectors,seqIn=[],seqLab=[];
+      for(var i=0;i<=lv.length-timesteps-1;i++){seqIn.push(lv.slice(i,i+timesteps));seqLab.push(lv[i+timesteps])}
       xs=tf.tensor3d(seqIn); ys=tf.tensor2d(seqLab);
       model=tf.sequential();
-      model.add(tf.layers.lstm({units:48,inputShape:[timesteps,featureSize],returnSequences:false,kernelInitializer:tf.initializers.glorotUniform({seed:7}),recurrentInitializer:tf.initializers.orthogonal({seed:7})}));
+      model.add(tf.layers.lstm({units:24,inputShape:[timesteps,featureSize],returnSequences:false,kernelInitializer:tf.initializers.glorotUniform({seed:7}),recurrentInitializer:tf.initializers.orthogonal({seed:7})}));
       
-      model.add(tf.layers.dense({units:32,activation:"relu",kernelInitializer:tf.initializers.glorotUniform({seed:8})}));
+      model.add(tf.layers.dense({units:24,activation:"relu",kernelInitializer:tf.initializers.glorotUniform({seed:8})}));
       model.add(tf.layers.dense({units:featureSize,activation:"sigmoid",kernelInitializer:tf.initializers.glorotUniform({seed:11})}));
-      logTrain("<b>[LSTM]</b> Huấn luyện trên "+rawDraws.length+" kỳ thật");
+      logTrain("<b>[LSTM]</b> 24 đơn vị · "+seqIn.length+" mẫu · "+epochs+" epoch · data thật");
     } else {
       xs=tf.tensor2d(vectors.slice(0,-1)); ys=tf.tensor2d(vectors.slice(1));
       model=tf.sequential();
@@ -1308,7 +1334,8 @@ async function trainAndPredict(){
     }
     model.compile({optimizer:tf.train.adam(0.01),loss:"binaryCrossentropy"});
     progress.style.width="25%";
-    await model.fit(xs,ys,{epochs:epochs,batchSize:Math.min(16,xs.shape[0]),shuffle:false,callbacks:{onEpochEnd:async function(epoch,logs){
+    await model.fit(xs,ys,{epochs:epochs,batchSize:Math.min(16,xs.shape[0]),shuffle:false,yieldEvery:"batch",callbacks:{onEpochEnd:async function(epoch,logs){
+      if(Date.now()-t0>20000){model.stopTraining=true;logTrain("<b style='color:#fbbf24'>[TF]</b> Quá 20 giây → dừng sớm để không treo");}
       progress.style.width=Math.floor(25+((epoch+1)/epochs)*60)+"%";
       logTrain("Epoch <b>"+(epoch+1)+"/"+epochs+"</b> loss:<b>"+(logs.loss!=null?logs.loss.toFixed(4):"—")+"</b>");
       await tf.nextFrame();
@@ -1319,6 +1346,7 @@ async function trainAndPredict(){
       return model.predict(input).dataSync().slice();
     });
     xs.dispose();ys.dispose();model.dispose();
+    if(prevBackend&&prevBackend!=="cpu"){try{await tf.setBackend(prevBackend);await tf.ready();}catch(e){}}
   } else {
     predictionData=buildFreqProbs(gameType);
     logTrain("<b>[Freq]</b> Tần suất thật (TF chưa sẵn sàng)");
@@ -1333,15 +1361,24 @@ async function trainAndPredict(){
   var allSets=[];
   var listEl=document.getElementById("predictionsList");
   listEl.innerHTML="";
-  allSets=buildSetsDet(gameType, predictionData, getPredictQty());
-  logTrain("<b>[Bộ số]</b> Chọn số có xác suất cao nhất (xác định, không ngẫu nhiên) · "+allSets.length+" bộ · không trùng số giữa các bộ");
+  var qty0=getPredictQty(),tot0=variantTotal(gameType,qty0),v0=RS.variant||0,guard0=0,cycled=false;
+  allSets=buildSetsDet(gameType, predictionData, qty0, v0, rawDraws);
+  while(RS.sigs.indexOf(canonSig(allSets))>=0&&guard0<tot0){guard0++;v0++;allSets=buildSetsDet(gameType, predictionData, qty0, v0, rawDraws);}
+  if(guard0>=tot0){RS.sigs=[];cycled=true;}
+  RS.sigs.push(canonSig(allSets));RS.variant=v0+1;
+  logTrain("<b>[Bộ số]</b> "+allSets.length+" bộ KHÁC NHAU mỗi lần huấn luyện · lần #"+RS.seq+" · cấu hình "+(v0%tot0+1)+"/"+tot0+" · không trùng số giữa các bộ · không ngẫu nhiên"+(cycled?" · đã duyệt hết tổ hợp ưu tiên, quay vòng":""));
+  var meterScore=computeDynamicMeter(predictionData,allSets,gameType,rawDraws.length,v0,trainDraws.length);
   allSets.forEach(function(selected,c){
     var row=document.createElement("div"); row.className="set-row";
-    row.innerHTML='<span class="set-tag">#'+(c+1)+'</span><div style="display:flex;flex-wrap:wrap;gap:2px">'+renderBalls(selected,gameType)+'</div>';
+    var pc=lastSetScores[c];
+    row.innerHTML='<span class="set-tag">#'+(c+1)+'</span><div style="display:flex;flex-wrap:wrap;gap:2px">'+renderBalls(selected,gameType)+'</div><span class="set-ai" title="Backtest thật: bộ này vượt bao nhiêu % bộ ngẫu nhiên trên các kỳ đã quay (50% = ngang ngẫu nhiên). Không phải xác suất trúng.">'+(pc!=null?pc+"%":"—")+'</span>';
     listEl.appendChild(row);
   });
+  applySetsScroll(listEl,allSets.length);
+  var ol=document.getElementById("oddsLine");if(ol)ol.textContent=jackpotOddsText(gameType);
   displayResult(allSets[0],gameType,"ai");
-  applyMeterScore(computeDynamicMeter(predictionData,allSets,gameType,rawDraws.length));
+  if(meterScore==null){resetMeter();var _b=document.getElementById("meterBadge");_b.textContent="CHƯA ĐỦ KỲ BACKTEST";logTrain("<b style='color:#fbbf24'>[Meter]</b> Cần ≥ 21 kỳ thật để backtest — chưa tính %");}
+  else{applyMeterScore(meterScore);var bt=lastBacktest;logTrain("<b>[Backtest]</b> "+bt.B+" kỳ thật gần nhất · mỗi kỳ chỉ dùng dữ liệu trước đó · TB trùng "+(bt.avgHit.reduce(function(a,b){return a+b},0)/bt.avgHit.length).toFixed(3)+" vs ngẫu nhiên "+(bt.avgExp.reduce(function(a,b){return a+b},0)/bt.avgExp.length).toFixed(3)+" · 50% = ngang ngẫu nhiên");}
   playResult(); fireworks(); vibratePhone();
   logTrain("<b style='color:#34d399'>[OK]</b> Đã sinh "+allSets.length+" bộ số");
   }catch(err){
@@ -1359,8 +1396,9 @@ async function trainAndPredict(){
         row.innerHTML='<span class="set-tag">#'+(c+1)+'</span><div style="display:flex;flex-wrap:wrap;gap:2px">'+renderBalls(selected,gameType)+'</div>';
         listEl2.appendChild(row);
       });
+      applySetsScroll(listEl2,fbSets.length);
       displayResult(fbSets[0],gameType,"ai");
-      applyMeterScore(computeDynamicMeter(fb,fbSets,gameType,rawDraws.length));
+      var fbm=computeDynamicMeter(fb,fbSets,gameType,rawDraws.length,0,100);if(fbm!=null)applyMeterScore(fbm);
       playResult(); fireworks();
       logTrain("<b>[Fallback]</b> Freq deterministic — vẫn có kết quả");
     }catch(e2){
@@ -1436,11 +1474,10 @@ window.onload=function(){
   });
   try{applyAutoAlgo()}catch(e){}
   if(window.tf) tf.ready().then(function(){logTrain("<b>[TF]</b> "+tf.getBackend())});
-  // Mỗi 30 phút (khi tab còn sống): kiểm tra public + gọi Worker sync nền
+  // Mỗi 30 phút (khi tab còn sống): kiểm tra nguồn công khai (giữ nguyên lịch)
   setInterval(async function(){
     try{
-      // Gợi ý Worker sync (chạy trên CF, không phụ thuộc tab nếu đã set Cron)
-      fetch(WORKER_BASE+"?action=sync-public&t="+Date.now()).catch(function(){});
+      // Worker tự đồng bộ theo Cron Trigger (0 0,8,14,19,22 * * *) — app không gọi Worker mỗi 30 phút nữa để tiết kiệm hạn mức Cloudflare free
       if(document.hidden) return;
       var gt=document.getElementById("gameTypeTf").value;
       var pub=await fetchPublicJsonl(gt, 40);

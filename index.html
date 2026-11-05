@@ -258,7 +258,17 @@ body.light .meter{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.06);}
 body.light .log{background:rgba(0,0,0,.04);color:#475569;border-color:rgba(0,0,0,.08);}
 .log b{color:#34d399;}
 .sets{flex:none;margin:4px 0;}
-body.has-sets .log{min-height:30px;max-height:44px;}
+.sel-row{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;margin:4px 0 2px;}
+.sel-row select.s{width:auto;min-width:0;flex:1 1 40%;max-width:48%;text-align:center;text-align-last:center;font-weight:700;font-size:.74rem;padding:7px 22px 7px 8px;border:1.5px solid rgba(251,191,36,.45);border-radius:12px;background:rgba(15,23,42,.85);color:#f1f5f9;}
+body.light .sel-row select.s{background:#fff;color:#1e293b;border-color:rgba(180,83,9,.35);}
+.sel-row .auto-badge{margin:0;font-size:9px;}
+.live-panel{padding:6px 8px !important;}
+.live-panel .lp-row{gap:2px 10px;font-size:.7rem;}
+.qty-row{margin:2px 0 3px !important;}
+.hint{margin:1px 0 !important;}
+.tf-zone.grow .log{flex:1 1 auto;min-height:64px;max-height:none;}
+body.has-sets #resultArea,body.has-sets #scanArea,body.has-sets #resultGameLabel{display:none;}
+body.has-sets .log{font-size:.64rem;}
 .tf-zone.grow{overflow-y:auto;-webkit-overflow-scrolling:touch;}
 .sets.scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
 .set-ai{margin-left:auto;font-size:.6rem;font-weight:700;padding:2px 7px;border-radius:99px;background:rgba(52,211,153,.14);color:#34d399;white-space:nowrap;}
@@ -310,8 +320,7 @@ body.light .set-row{background:rgba(0,0,0,.04);}
       <span id="lpSource"><b>NGUỒN:</b> —</span>
       <span id="lpErr"><b>LỖI:</b> không</span>
     </div>
-    <div class="lp-row"><span id="lpNext"><b>KỲ KẾ TIẾP:</b> —</span></div>
-    <div class="lp-row"><span id="lpCount"><b>ĐẾM NGƯỢC:</b> —</span></div>
+    <div class="lp-row"><span id="lpNext"><b>KỲ KẾ TIẾP:</b> —</span><span id="lpCount"><b>ĐẾM NGƯỢC:</b> —</span></div>
     <div class="lp-row">
       <button type="button" class="g mini" onclick="refreshPublicData(true)">↻ Data công khai</button>
       <button type="button" class="g mini" onclick="initLive()">↻ Live KV</button>
@@ -320,7 +329,7 @@ body.light .set-row{background:rgba(0,0,0,.04);}
 
   <div class="sec tf-zone grow">
     <div class="sec-h">🧠 Huấn luyện TensorFlow AI</div>
-    <div class="game-select-wrap">
+    <div class="sel-row">
       <select class="s" id="gameTypeTf" onchange="onGameChange()">
         <option value="mega645">Mega 6/45</option>
         <option value="power655">Power 6/55</option>
@@ -329,19 +338,15 @@ body.light .set-row{background:rgba(0,0,0,.04);}
         <option value="max3dplus">Max 3D+</option>
         <option value="max3dpro" selected>Max 3D Pro</option>
       </select>
-    </div>
-    <div class="algo-row">
-      <label>THUẬT TOÁN AI <span class="auto-badge" id="autoBadge">✨ Tự động chọn</span></label>
-      <div class="game-select-wrap">
-        <select class="s" id="algoSelect" onchange="onAlgoChange()">
-          <option value="tf-lstm">LSTM</option>
-          <option value="tf-dense">Dense</option>
-          <option value="rf">Random Forest</option>
-          <option value="bayes">Bayesian</option>
-          <option value="markov">Markov Chain</option>
-          <option value="freq-weighted">Frequency</option>
-        </select>
-      </div>
+      <select class="s" id="algoSelect" onchange="onAlgoChange()">
+        <option value="tf-lstm">LSTM</option>
+        <option value="tf-dense">Dense</option>
+        <option value="rf">Random Forest</option>
+        <option value="bayes">Bayesian</option>
+        <option value="markov">Markov Chain</option>
+        <option value="freq-weighted">Frequency</option>
+      </select>
+      <span class="auto-badge" id="autoBadge">✨ Tự động</span>
     </div>
     <div class="qty-row">
       <label>SỐ LƯỢNG BỘ SỐ DỰ ĐOÁN</label>
@@ -373,7 +378,7 @@ body.light .set-row{background:rgba(0,0,0,.04);}
   </div>
 
   <div class="train-foot">
-    <button class="g primary" id="btnTrain" onclick="trainAndPredict()">🚀 HUẤN LUYỆN TENSORFLOW AI</button>
+    <button class="g primary" id="btnTrain" onclick="hapticTap();trainAndPredict()">🚀 HUẤN LUYỆN TENSORFLOW AI</button>
   </div>
 
 </div>
@@ -438,7 +443,20 @@ function toggleSound(){soundEnabled=!soundEnabled;document.getElementById("btnSo
 function toggleDark(){var L=document.body.classList.toggle("light");document.documentElement.classList.toggle("dark",!L);document.getElementById("btnTheme").textContent=L?"☀️":"🌙";playClick()}
 document.addEventListener("touchstart",initAudio,{once:true});
 document.addEventListener("click",initAudio,{once:true});
-function vibratePhone(){if(navigator.vibrate)navigator.vibrate(160)}
+var _hapLbl=null;
+/** Rung: Android/Chrome dùng navigator.vibrate. iPhone Safari không hỗ trợ vibrate → dùng haptic của input[switch] (iOS 18+), phải gọi trong thao tác chạm. */
+function hapticTap(){
+  try{if(navigator.vibrate){navigator.vibrate(60);return}}catch(e){}
+  try{
+    if(!_hapLbl){
+      var l=document.createElement("label");l.setAttribute("aria-hidden","true");
+      l.style.cssText="position:fixed;left:-100px;top:-100px;width:1px;height:1px;opacity:0;pointer-events:none;";
+      var i=document.createElement("input");i.type="checkbox";i.setAttribute("switch","");l.appendChild(i);document.body.appendChild(l);_hapLbl=l;
+    }
+    _hapLbl.click();
+  }catch(e){}
+}
+function vibratePhone(){try{if(navigator.vibrate)navigator.vibrate(160);else hapticTap()}catch(e){}}
 function fireworks(){if(typeof confetti==="function"){confetti({particleCount:60,spread:55,origin:{y:0.55}});setTimeout(function(){confetti({particleCount:30,angle:60,spread:40,origin:{x:0,y:0.6}})},150);setTimeout(function(){confetti({particleCount:30,angle:120,spread:40,origin:{x:1,y:0.6}})},250)}}
 
 /* birth UI removed */

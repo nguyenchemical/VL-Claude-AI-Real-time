@@ -917,7 +917,7 @@ function applyMeterScore(score){
   // Jackpot tiền thật — tách biệt, chỉ hiển thị từ Live
   var jv=document.getElementById("jackpotVal");
   var _gt=document.getElementById("gameTypeTf").value;
-  if(typeof JP_GAMES!=="undefined"&&JP_GAMES[_gt]){var _e=jpEntry(_gt);jv.textContent=(_e&&_e.g.basis==="current")?(_e.g.jackpot/1e9).toFixed(1)+" tỷ":"—";}
+  if(typeof JP_GAMES!=="undefined"&&JP_GAMES[_gt]){var _e=jpEntry(_gt);jv.textContent=(_e&&_e.g.basis!=="last-draw")?(_e.g.jackpot/1e9).toFixed(1)+" tỷ":"—";}
   else if(lastRealJackpotBillion!=null) jv.textContent=lastRealJackpotBillion.toFixed(1)+" tỷ";
 }
 
@@ -1260,7 +1260,15 @@ function renderJackpot(logIt){
   else h+="<span class=\"lp-ok\">"+fmtVnd(g.jackpot)+"</span>";
   var id=g.drawId||(info&&info.id)||"";
   if(g.basis==="last-draw")h+=" <span class=\"lp-warn\">· đây là Jackpot của kỳ ĐÃ quay "+(g.drawId||"")+(g.drawDate?" ("+g.drawDate+")":"")+", KHÔNG phải kỳ hiện tại — vietlott.vn chưa cho đọc giá trị kỳ hiện tại</span>";
-  else{h+=" · kỳ "+id;if(g.drawId&&info&&info.id&&g.drawId!==info.id)h+=" <span class=\"lp-warn\">(app đang tính kỳ "+info.id+")</span>";}
+  else{
+    h+=" · kỳ "+id;
+    if(g.drawId&&info&&info.id&&g.drawId!==info.id)h+=" <span class=\"lp-warn\">(app đang tính kỳ "+info.id+")</span>";
+    if(g.basis==="derived"){
+      var w=g.won||[],nt=[];
+      if(w[0])nt.push(gt==="power655"?"J1":"Jackpot");if(w[1])nt.push("J2");
+      h+=" <span style=\"opacity:.75\">· theo KQ kỳ "+(g.afterDrawId||"")+(nt.length?" · "+nt.join("+")+" vừa có người trúng → về mức khởi điểm":" · chưa ai trúng, tích lũy tiếp")+"</span>";
+    }
+  }
   h+=" <span style=\"opacity:.7\">· "+(e.stale?"<span class=\"lp-warn\">dữ liệu cũ</span> ":"")+jpHms(e.at)+"</span>";
   el.innerHTML=h;
   var key=gt+"|"+g.jackpot+"|"+(g.jackpot2||"")+"|"+(g.drawId||"")+"|"+g.basis;

@@ -87,6 +87,8 @@ body.light .live-panel{background:rgba(241,245,249,.95);border-color:rgba(0,0,0,
 body.light .live-panel b{color:#b45309;}
 .live-panel .lp-row{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;}
 .live-panel .lp-ok{color:#34d399;font-weight:700;}
+.live-panel{border-left:3px solid var(--gc,#fbbf24) !important;}
+.sel-row select#gameTypeTf{border-color:var(--gc,#fbbf24) !important;}
 .live-panel .lp-err{color:#f87171;font-weight:700;}
 .live-panel .lp-warn{color:#fbbf24;font-weight:700;}
 btn.g.mini{font-size:.65rem;padding:5px 10px;margin:2px;}
@@ -1244,9 +1246,11 @@ function jpPlain(gt){
   if(gt==="power655"&&g.jackpot2!=null)t="Power 6/55: Jackpot 1 "+fmtVnd(g.jackpot)+" · Jackpot 2 "+fmtVnd(g.jackpot2);
   return t+(g.basis==="last-draw"?" (kỳ vừa quay "+(g.drawId||"")+")":(g.drawId?" · kỳ "+g.drawId:""));
 }
+var GAME_COLORS={mega645:"#ef3b3b",power655:"#c9a13b",lotto535:"#2e9e4f",max3d:"#d63ca6",max3dplus:"#d63ca6",max3dpro:"#a5288c"};
 function renderJackpot(logIt){
   var el=document.getElementById("lpJackpot");if(!el)return;
   var gt=document.getElementById("gameTypeTf").value;
+  document.documentElement.style.setProperty("--gc",GAME_COLORS[gt]||"#fbbf24");
   if(!JP_GAMES[gt]){el.style.display="none";return}
   el.style.display="";
   var e=jpEntry(gt),info=null;try{info=nextDrawInfo(gt,rawDraws&&rawDraws[0])}catch(x){}

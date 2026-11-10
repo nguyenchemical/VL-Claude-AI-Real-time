@@ -266,7 +266,10 @@ body.light .sel-row select.s{background:#fff;color:#1e293b;border-color:rgba(180
 .live-panel .lp-row{gap:2px 10px;font-size:.7rem;}
 .qty-row{margin:2px 0 3px !important;}
 .hint{margin:1px 0 !important;}
-.tf-zone.grow .log{flex:1 1 auto;min-height:64px;max-height:none;}
+.tf-zone.grow .log{flex:none;height:calc(7em + 14px);min-height:0;max-height:none;}
+body.has-sets .tf-zone.grow .log{flex:1 1 auto;height:auto;min-height:calc(7em + 14px);}
+#predictionsList.dense .ball{width:32px;height:32px;font-size:.8rem;}
+#lpJackpot{font-size:.7rem;}
 body.has-sets #resultArea,body.has-sets #scanArea,body.has-sets #resultGameLabel{display:none;}
 body.has-sets .log{font-size:.64rem;}
 .tf-zone.grow{overflow-y:auto;-webkit-overflow-scrolling:touch;}
@@ -321,6 +324,7 @@ body.light .set-row{background:rgba(0,0,0,.04);}
       <span id="lpErr"><b>LỖI:</b> không</span>
     </div>
     <div class="lp-row"><span id="lpNext"><b>KỲ KẾ TIẾP:</b> —</span><span id="lpCount"><b>ĐẾM NGƯỢC:</b> —</span></div>
+    <div class="lp-row" id="lpJackpot" style="display:none"></div>
     <div class="lp-row">
       <button type="button" class="g mini" onclick="refreshPublicData(true)">↻ Data công khai</button>
       <button type="button" class="g mini" onclick="initLive()">↻ Live KV</button>
@@ -1228,18 +1232,64 @@ function updateNextDraw(){var el=document.getElementById("lpNext"),ct=document.g
   var r=Math.max(0,info.ts-Date.now()),h=Math.floor(r/36e5),m=Math.floor(r%36e5/6e4),sc=Math.floor(r%6e4/1e3),z=function(x){return ("0"+x).slice(-2)};
   ct.innerHTML="<b>ĐẾM NGƯỢC:</b> "+z(h)+":"+z(m)+":"+z(sc);}
 setInterval(updateNextDraw,1000);
+/* ===== Jackpot THẬT từ vietlott.vn (qua Worker) — chỉ Mega 6/45, Power 6/55, Lotto 5/35 ===== */
+var JP_GAMES={mega645:1,power655:1,lotto535:1},jackpotState=null,_jpBusy=false,_jpKey="";
+function fmtVnd(n){return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,".")+"đ"}
+function jpEntry(gt){var st=jackpotState;if(!st)return null;if(st.games&&st.games[gt])return {g:st.games[gt],at:st.at,stale:false};if(st.stale&&st.stale.games&&st.stale.games[gt])return {g:st.stale.games[gt],at:st.stale.at,stale:true};return null}
+function jpHms(ts){var d=new Date(ts),z=function(x){return ("0"+x).slice(-2)};return z(d.getHours())+":"+z(d.getMinutes())+":"+z(d.getSeconds())}
+function jpPlain(gt){
+  var e=jpEntry(gt);if(!e)return null;var g=e.g,t=(GAME_NAMES[gt]||gt)+": "+fmtVnd(g.jackpot);
+  if(gt==="power655"&&g.jackpot2!=null)t="Power 6/55: Jackpot 1 "+fmtVnd(g.jackpot)+" · Jackpot 2 "+fmtVnd(g.jackpot2);
+  return t+(g.basis==="last-draw"?" (kỳ vừa quay "+(g.drawId||"")+")":(g.drawId?" · kỳ "+g.drawId:""));
+}
+function renderJackpot(logIt){
+  var el=document.getElementById("lpJackpot");if(!el)return;
+  var gt=document.getElementById("gameTypeTf").value;
+  if(!JP_GAMES[gt]){el.style.display="none";return}
+  el.style.display="";
+  var e=jpEntry(gt),info=null;try{info=nextDrawInfo(gt,rawDraws&&rawDraws[0])}catch(x){}
+  if(!jackpotState){el.innerHTML="<b>💰 JACKPOT:</b> <span class=\"lp-warn\">đang lấy từ vietlott.vn…</span>";return}
+  if(!e){
+    var er=jackpotState.errors||{},msg=er.home||er[gt]||er.net||"không có dữ liệu";
+    el.innerHTML="<b>💰 JACKPOT:</b> <span class=\"lp-err\">Chưa lấy được từ vietlott.vn — "+msg+"</span>";return;
+  }
+  var g=e.g,h="<b>💰 "+(GAME_NAMES[gt]||gt)+"</b> ";
+  if(gt==="power655"){h+="J1 <span class=\"lp-ok\">"+fmtVnd(g.jackpot)+"</span>"+(g.jackpot2!=null?" · J2 <span class=\"lp-ok\">"+fmtVnd(g.jackpot2)+"</span>":" · J2 <span class=\"lp-warn\">chưa đọc được</span>");}
+  else h+="<span class=\"lp-ok\">"+fmtVnd(g.jackpot)+"</span>";
+  var id=g.drawId||(info&&info.id)||"";
+  if(g.basis==="last-draw")h+=" <span class=\"lp-warn\">· giá trị kỳ vừa quay "+(g.drawId||"")+" (chưa lấy được kỳ hiện tại)</span>";
+  else{h+=" · kỳ "+id;if(g.drawId&&info&&info.id&&g.drawId!==info.id)h+=" <span class=\"lp-warn\">(app đang tính kỳ "+info.id+")</span>";}
+  h+=" <span style=\"opacity:.7\">· "+(e.stale?"<span class=\"lp-warn\">dữ liệu cũ</span> ":"")+jpHms(e.at)+"</span>";
+  el.innerHTML=h;
+  var key=gt+"|"+g.jackpot+"|"+(g.jackpot2||"")+"|"+(g.drawId||"")+"|"+g.basis;
+  if(logIt&&key!==_jpKey){_jpKey=key;logTrain("<b>[Jackpot]</b> "+jpPlain(gt)+" · vietlott.vn");}
+}
+async function loadJackpot(){
+  var gt=document.getElementById("gameTypeTf").value;
+  if(!JP_GAMES[gt]){renderJackpot(false);return}
+  if(_jpBusy)return;_jpBusy=true;
+  try{
+    var r=await fetchWithTimeout(WORKER_BASE+"?action=jackpot&t="+Date.now(),{cache:"no-store"},20000);
+    jackpotState=await r.json();
+  }catch(e){jackpotState={at:Date.now(),games:{},errors:{net:String(e.message||e)}}}
+  _jpBusy=false;renderJackpot(true);
+}
+setInterval(function(){if(!document.hidden)loadJackpot()},90000);
+setInterval(function(){try{renderJackpot(false)}catch(e){}},15000);
+
 function onGameChange(){ applyAutoAlgo(); updateNextDraw(); predictQty=Math.min(predictQty,maxQty());var _q=document.getElementById("predictQtyVal");if(_q)_q.textContent=String(predictQty);
   var gt=document.getElementById("gameTypeTf").value;
   currentGame=gt;
   lastPredictionProbs=null;
   resetMeter();
   setResultLabel(gt,"ai");
+  renderJackpot(false);loadJackpot();
   initLive();
 }
 var runStates={};
 /** 1–3 bộ: hiển thị đủ, KHÔNG cuộn. Từ 4 bộ: chỉ cuộn dọc, khung cao đúng 3 hàng. */
 function applySetsScroll(el,n){
-  el.classList.remove("scroll");el.style.maxHeight="";el.style.overflow="";
+  el.classList.remove("scroll");el.style.maxHeight="";el.style.overflow="";el.classList.toggle("dense",n>=3);
   document.body.classList.toggle("has-sets",n>0);
   if(n>=4){var k=el.children,h=0,i;for(i=0;i<3&&i<k.length;i++)h+=k[i].offsetHeight+3;el.classList.add("scroll");el.style.maxHeight=(h||230)+"px";}
   else el.style.overflow="visible";
@@ -1385,6 +1435,7 @@ async function trainAndPredict(){
   if(guard0>=tot0){RS.sigs=[];cycled=true;}
   RS.sigs.push(canonSig(allSets));RS.variant=v0+1;
   logTrain("<b>[Bộ số]</b> "+allSets.length+" bộ KHÁC NHAU mỗi lần huấn luyện · lần #"+RS.seq+" · cấu hình "+(v0%tot0+1)+"/"+tot0+" · không trùng số giữa các bộ · không ngẫu nhiên"+(cycled?" · đã duyệt hết tổ hợp ưu tiên, quay vòng":""));
+  if(JP_GAMES[gameType]){var _jl=jpPlain(gameType);logTrain("<b>[Jackpot]</b> "+(_jl?_jl+" · vietlott.vn":"<span style='color:#fbbf24'>chưa có số liệu Jackpot thật</span>"));}
   var meterScore=computeDynamicMeter(predictionData,allSets,gameType,rawDraws.length,v0,trainDraws.length);
   allSets.forEach(function(selected,c){
     var row=document.createElement("div"); row.className="set-row";
@@ -1470,6 +1521,7 @@ setInterval(async function(){
       lastSeenDrawId=fresh[0].id;
       setLiveStatus(true,rawDraws.length+" kỳ · mới");
       logTrain("<b>[Kỳ mới]</b> "+fresh[0].id);
+      loadJackpot();
     }
   }catch(e){}
 },60000);
@@ -1477,6 +1529,7 @@ setInterval(async function(){
 window.onload=function(){
   var qel=document.getElementById("predictQtyVal");
   if(qel) qel.textContent=String(predictQty);
+  loadJackpot();
   initLive().then(async function(){
     if(!rawDraws||rawDraws.length<15){
       logTrain("<b>[Auto]</b> KV chỉ có "+((rawDraws&&rawDraws.length)||0)+" kỳ (<15) → Worker tự nạp dữ liệu công khai vào KV…");

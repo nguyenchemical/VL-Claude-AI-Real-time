@@ -1251,15 +1251,23 @@ function renderJackpot(logIt){
   var el=document.getElementById("lpJackpot");if(!el)return;
   var gt=document.getElementById("gameTypeTf").value;
   document.documentElement.style.setProperty("--gc",GAME_COLORS[gt]||"#fbbf24");
-  if(!JP_GAMES[gt]){el.style.display="none";return}
+  if(!JP_GAMES[gt]){el.style.display="none";var jv2=document.getElementById("jackpotVal");if(jv2)jv2.textContent="—";return}
   el.style.display="";
   var e=jpEntry(gt),info=null;try{info=nextDrawInfo(gt,rawDraws&&rawDraws[0])}catch(x){}
   if(!jackpotState){el.innerHTML="<b>💰 JACKPOT:</b> <span class=\"lp-warn\">đang lấy từ vietlott.vn…</span>";return}
   if(!e){
-    var er=jackpotState.errors||{},msg=er.home||er[gt]||er.net||"không có dữ liệu";
-    el.innerHTML="<b>💰 JACKPOT:</b> <span class=\"lp-err\">Chưa lấy được từ vietlott.vn — "+msg+"</span>";return;
+    var er=jackpotState.errors||{},msg=er[gt]||er.home||er.net||"không có dữ liệu";
+    el.innerHTML="<b>💰 "+(GAME_NAMES[gt]||"JACKPOT")+"</b> <span class=\"lp-err\">chưa lấy được từ vietlott.vn — "+msg+"</span>";
+    var jv3=document.getElementById("jackpotVal");if(jv3)jv3.textContent="—";
+    return;
   }
   var g=e.g,h="<b>💰 "+(GAME_NAMES[gt]||gt)+"</b> ";
+  if(e.stale){
+    var er2=jackpotState.errors||{};
+    el.innerHTML=h+"<span class=\"lp-err\">chưa cập nhật được — "+(er2[gt]||er2.home||er2.net||"lỗi không rõ")+"</span> <span style=\"opacity:.7\">· giá trị lưu lúc "+jpHms(e.at)+": "+fmtVnd(g.jackpot)+(g.jackpot2!=null?" / "+fmtVnd(g.jackpot2):"")+" (có thể đã cũ)</span>";
+    var jv0=document.getElementById("jackpotVal");if(jv0)jv0.textContent="—";
+    return;
+  }
   if(gt==="power655"){h+="J1 <span class=\"lp-ok\">"+fmtVnd(g.jackpot)+"</span>"+(g.jackpot2!=null?" · J2 <span class=\"lp-ok\">"+fmtVnd(g.jackpot2)+"</span>":" · J2 <span class=\"lp-warn\">chưa đọc được</span>");}
   else h+="<span class=\"lp-ok\">"+fmtVnd(g.jackpot)+"</span>";
   var id=g.drawId||(info&&info.id)||"";
@@ -1273,8 +1281,9 @@ function renderJackpot(logIt){
       h+=" <span style=\"opacity:.75\">· theo KQ kỳ "+(g.afterDrawId||"")+(nt.length?" · "+nt.join("+")+" vừa có người trúng → về mức khởi điểm":" · chưa ai trúng, tích lũy tiếp")+"</span>";
     }
   }
-  h+=" <span style=\"opacity:.7\">· "+(e.stale?"<span class=\"lp-warn\">dữ liệu cũ</span> ":"")+jpHms(e.at)+"</span>";
+  h+=" <span style=\"opacity:.7\">· "+jpHms(e.at)+"</span>";
   el.innerHTML=h;
+  var jv1=document.getElementById("jackpotVal");if(jv1&&g.basis!=="last-draw")jv1.textContent=(g.jackpot/1e9).toFixed(1)+" tỷ";
   var key=gt+"|"+g.jackpot+"|"+(g.jackpot2||"")+"|"+(g.drawId||"")+"|"+g.basis;
   if(logIt&&key!==_jpKey){_jpKey=key;logTrain("<b>[Jackpot]</b> "+jpPlain(gt)+" · vietlott.vn");}
 }
